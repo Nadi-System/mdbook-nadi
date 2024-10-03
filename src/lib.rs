@@ -61,9 +61,15 @@ fn process_book_item(item: &mut BookItem, pwd: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn is_task(mark: &str) -> bool {
+type CodeHandler = fn(&str, &str, &Path) -> Result<(String, String), Error>;
+
+fn nadi_code_args(mark: &str) -> Option<(CodeHandler, String)> {
     // only run for ones with "run" in it
-    mark.contains("task run")
+    mark.split_once(" run").and_then(|(p, a)| match p.trim() {
+        "task" => Some((run_task as CodeHandler, a.to_string())),
+        "stp" | "string-template" => Some((run_template as CodeHandler, a.to_string())),
+        _ => None,
+    })
 }
 
 fn run_chapter(chap: &str, pwd: &Path) -> anyhow::Result<String> {
@@ -76,6 +82,8 @@ fn run_chapter(chap: &str, pwd: &Path) -> anyhow::Result<String> {
     let mut state = State::None;
     let mut buf = String::with_capacity(chap.len() * 2);
     let mut parser = mdbook::utils::new_cmark_parser(chap, false);
+    let mut args = String::new();
+    let mut handler: CodeHandler = run_task;
 
     let mut task_script = String::new();
     let events = parser.try_fold(vec![], |mut acc, ref e| -> anyhow::Result<Vec<Event<'_>>> {
@@ -84,9 +92,13 @@ fn run_chapter(chap: &str, pwd: &Path) -> anyhow::Result<String> {
         use Event::*;
         use State::*;
         match (e, &mut state) {
-            (Start(Tag::CodeBlock(Fenced(Borrowed(mark)))), None) if is_task(mark) => {
+            (Start(Tag::CodeBlock(Fenced(Borrowed(mark)))), None) => {
                 acc.push(e.clone());
-                state = Open;
+                if let Some((h, a)) = nadi_code_args(mark) {
+                    state = Open;
+                    args = a;
+                    handler = h;
+                }
             }
             (Text(Borrowed(txt)), Open) => {
                 acc.push(e.clone());
@@ -101,8 +113,8 @@ fn run_chapter(chap: &str, pwd: &Path) -> anyhow::Result<String> {
             (End(TagEnd::CodeBlock), Gather) => {
                 state = None;
                 acc.push(e.clone());
-                let results: String = run_task(&task_script, pwd)?;
-                acc.push(Text("Results:\n".into()));
+                let (head, results) = handler(&task_script, &args, pwd)?;
+                acc.push(Text(head.into()));
                 acc.push(Start(Tag::CodeBlock(Fenced("output".into()))));
                 acc.push(Text(results.into()));
                 acc.push(End(TagEnd::CodeBlock));
@@ -116,7 +128,7 @@ fn run_chapter(chap: &str, pwd: &Path) -> anyhow::Result<String> {
     Ok(cmark(events.iter(), &mut buf).map(|_| buf)?)
 }
 
-fn run_task(task: &str, pwd: &Path) -> anyhow::Result<String> {
+fn run_task(task: &str, _args: &str, pwd: &Path) -> anyhow::Result<(String, String)> {
     // TODO proper temp random file
     let task_path = "/tmp/task-temp.tasks";
     let mut output = std::fs::File::create(task_path)?;
@@ -130,16 +142,30 @@ fn run_task(task: &str, pwd: &Path) -> anyhow::Result<String> {
         .output()
         .context("Could not run nadi command")?;
 
-    // let out = Command::new("pwd")
-    //     .current_dir(pwd)
-    //     .output()
-    //     .context("Could not run nadi command")?;
-
     if out.status.success() {
         let response = String::from_utf8_lossy(&out.stdout);
-        Ok(response.trim().to_string())
+        Ok(("Results:".into(), response.trim().to_string()))
     } else {
         let error = String::from_utf8_lossy(&out.stderr);
-        Ok(format!("****Error****\n{}", error.trim()))
+        Ok(("*Error*:".into(), error.trim().to_string()))
+    }
+}
+
+fn run_template(templ: &str, args: &str, _pwd: &Path) -> anyhow::Result<(String, String)> {
+    let templ = string_template_plus::Template::parse_template(templ)?;
+    let mut op = string_template_plus::RenderOptions::default();
+    for kv in args.split(';') {
+        if kv.is_empty() {
+            continue;
+        }
+        let (k, v) = kv
+            .split_once('=')
+            .context("variables not in key=value pairs")?;
+        op.variables
+            .insert(k.trim().to_string(), v.trim().to_string());
+    }
+    match string_template_plus::Render::render(&templ, &op) {
+        Ok(txt) => Ok((format!("Results (with: {args}): "), txt)),
+        Err(e) => Ok(("*Error*:".into(), e.to_string())),
     }
 }
