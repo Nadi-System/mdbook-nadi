@@ -1,19 +1,17 @@
-use anyhow::{Context, Error};
+use anyhow::Error;
 use mdbook::book::{Book, BookItem};
 use mdbook::preprocess::{Preprocessor, PreprocessorContext};
 
 use pulldown_cmark::{CodeBlockKind, CowStr, Event, Tag, TagEnd};
 use pulldown_cmark_to_cmark::cmark;
-use std::io::Write;
+
 use std::path::Path;
-use std::process::Command;
 
 mod cmark_events;
 mod code_args;
 mod output;
 
 use code_args::*;
-use output::*;
 
 // use serde::Deserialize;
 
@@ -34,6 +32,12 @@ use output::*;
 
 /// A NADI preprocessor.
 pub struct Nadi;
+
+impl Default for Nadi {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Nadi {
     pub fn new() -> Nadi {
@@ -99,11 +103,11 @@ fn run_chapter(chap: &str, pwd: &Path) -> anyhow::Result<String> {
             (Text(Borrowed(txt)), Open) => {
                 acc.push(e.clone());
                 task_script.clear();
-                task_script.push_str(&txt);
+                task_script.push_str(txt);
                 state = Gather;
             }
             (Text(Borrowed(txt)), Gather) => {
-                task_script.push_str(&txt);
+                task_script.push_str(txt);
                 acc.push(e.clone());
             }
             (End(TagEnd::CodeBlock), Gather) => {

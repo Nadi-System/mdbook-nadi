@@ -1,4 +1,4 @@
-use pulldown_cmark::{CodeBlockKind, CowStr, Event, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, CowStr, Event, Tag};
 
 pub fn event_to_static(event: Event<'_>) -> Event<'static> {
     match event {

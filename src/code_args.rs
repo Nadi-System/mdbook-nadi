@@ -1,5 +1,5 @@
 use anyhow::Context;
-use pulldown_cmark::{CodeBlockKind, CowStr, Event, Tag, TagEnd};
+use pulldown_cmark::Event;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
@@ -77,8 +77,8 @@ pub fn run_table(table: &str, args: &str, pwd: &Path) -> anyhow::Result<Vec<Even
     let mut output = std::fs::File::create(task_path)?;
     let mut table_contents = String::new();
     for line in table.split('\n') {
-        if line.starts_with('!') {
-            writeln!(output, "{}", &line[1..])?;
+        if let Some(l) = line.strip_prefix('!') {
+            writeln!(output, "{}", l)?;
         } else {
             table_contents.push_str(line);
             table_contents.push('\n');
