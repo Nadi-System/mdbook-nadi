@@ -36,17 +36,18 @@ pub fn run_task(task: &str, args: &str, pwd: &Path) -> anyhow::Result<Vec<Event<
     let handler = output_handler(output_fmt);
     if out.status.success() {
         let response = clipped_from_stdout(&out.stdout);
-        Ok(handler(vec![Event::Text("Results:".into())], response))
+        Ok(handler(vec![Event::Text("Results:".into())], response, pwd))
     } else {
         let error = String::from_utf8_lossy(&out.stderr);
         Ok(output_verbose(
             vec![Event::Text("*Error*:".into())],
             error.trim().to_string(),
+            pwd,
         ))
     }
 }
 
-pub fn run_template(templ: &str, args: &str, _pwd: &Path) -> anyhow::Result<Vec<Event<'static>>> {
+pub fn run_template(templ: &str, args: &str, pwd: &Path) -> anyhow::Result<Vec<Event<'static>>> {
     let templ = string_template_plus::Template::parse_template(templ)?;
     let mut op = string_template_plus::RenderOptions::default();
     for kv in args.split(';') {
@@ -63,10 +64,12 @@ pub fn run_template(templ: &str, args: &str, _pwd: &Path) -> anyhow::Result<Vec<
         Ok(txt) => Ok(output_verbose(
             vec![Event::Text(format!("Results (with: {args}):").into())],
             txt,
+            pwd,
         )),
         Err(e) => Ok(output_verbose(
             vec![Event::Text("*Error*:".into())],
             e.to_string(),
+            pwd,
         )),
     }
 }
@@ -109,12 +112,13 @@ pub fn run_table(table: &str, args: &str, pwd: &Path) -> anyhow::Result<Vec<Even
     let handler = output_handler(output_fmt);
     if out.status.success() {
         let response = clipped_from_stdout(&out.stdout);
-        Ok(handler(vec![Event::Text("Results:".into())], response))
+        Ok(handler(vec![Event::Text("Results:".into())], response, pwd))
     } else {
         let error = String::from_utf8_lossy(&out.stderr);
         Ok(output_verbose(
             vec![Event::Text("*Error*:".into())],
             error.trim().to_string(),
+            pwd,
         ))
     }
 }
