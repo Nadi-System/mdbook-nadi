@@ -8,7 +8,7 @@ pub fn output_handler(fmt: &str) -> OutputHandler {
     match fmt {
         "markdown" => output_markdown as OutputHandler,
         "verbose" | "txt" | "text" => output_verbose as OutputHandler,
-        "image" => output_image as OutputHandler,
+        "image" | "svg" | "png" => output_image as OutputHandler,
         "file" => output_file as OutputHandler,
         _ => output_verbose as OutputHandler,
     }
@@ -40,8 +40,16 @@ pub fn output_image(
     };
     pre.extend(vec![
         Event::HardBreak,
+        Event::Start(Tag::HtmlBlock),
+        Event::Html("<center>".into()),
+        Event::End(TagEnd::HtmlBlock),
+        Event::HardBreak,
         Event::Start(img),
         Event::End(TagEnd::Image),
+        Event::HardBreak,
+        Event::Start(Tag::HtmlBlock),
+        Event::Html("</center>".into()),
+        Event::End(TagEnd::HtmlBlock),
         Event::HardBreak,
     ]);
     pre

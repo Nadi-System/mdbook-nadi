@@ -1,5 +1,7 @@
 use pulldown_cmark::{CodeBlockKind, CowStr, Event, Tag};
 
+// https://github.com/pulldown-cmark/pulldown-cmark/pull/967
+// merged, remove this once the crate uses the updated version
 pub fn event_to_static(event: Event<'_>) -> Event<'static> {
     match event {
         // ones with lifetime
