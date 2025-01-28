@@ -35,7 +35,10 @@ pub fn run_task(task: &str, args: &str, pwd: &Path) -> anyhow::Result<Vec<Event<
     let output_fmt = args.trim().split(' ').next().unwrap_or("verbose");
     let handler = output_handler(output_fmt);
     if out.status.success() {
-        let response = clipped_from_stdout(&out.stdout);
+        let response = String::from_utf8_lossy(&strip_ansi_escapes::strip(&clipped_from_stdout(
+            &out.stdout,
+        )))
+        .to_string();
         Ok(handler(vec![Event::Text("Results:".into())], response, pwd))
     } else {
         let error = String::from_utf8_lossy(&out.stderr);
