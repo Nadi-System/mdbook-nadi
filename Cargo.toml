@@ -12,7 +12,7 @@ serde = "1.0.*"
 serde_json = "1.0.*"
 pulldown-cmark = "0.10.3"
 pulldown-cmark-to-cmark = "14.0.1"
-nadi_core = {path = "../nadi-system/nadi_core/", features=["parser"]}
+nadi_core = {path = "../nadi-system/nadi_core/"}
 string-template-plus = "0.4.3"
 strip-ansi-escapes = "0.2.1"
 mdbook = "0.4.49"

@@ -93,7 +93,9 @@ fn run_chapter(chap: &str, pwd: &Path) -> anyhow::Result<String> {
         use State::*;
         match (e, &mut state) {
             (Start(Tag::CodeBlock(Fenced(Borrowed(mark)))), None) => {
-                acc.push(e.clone());
+                acc.push(Start(Tag::CodeBlock(Fenced(Borrowed(
+                    mark.split(' ').next().unwrap_or_default().into(),
+                )))));
                 if let Some((h, a)) = nadi_code_args(mark) {
                     state = Open;
                     args = a;
