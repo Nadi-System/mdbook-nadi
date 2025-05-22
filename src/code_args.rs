@@ -1,10 +1,14 @@
-use anyhow::Context;
-use pulldown_cmark::Event;
-use std::io::Write;
-use std::path::Path;
-use std::process::Command;
-
 use crate::output::{clipped_from_stdout, output_handler, output_verbose};
+use anyhow::Context;
+use nadi_core::{
+    functions::NadiFunctions,
+    parser::{tasks, tokenizer::get_tokens},
+    tasks::TaskContext,
+};
+use pulldown_cmark::Event;
+use std::cell::OnceCell;
+use std::io::Read;
+use std::path::Path;
 
 pub type CodeHandler = fn(&str, &str, &Path) -> Result<Vec<Event<'static>>, anyhow::Error>;
 
@@ -18,36 +22,61 @@ pub fn nadi_code_args(mark: &str) -> Option<(CodeHandler, String)> {
     })
 }
 
-pub fn run_task(task: &str, args: &str, pwd: &Path) -> anyhow::Result<Vec<Event<'static>>> {
-    // TODO proper temp random file
-    let task_path = "/tmp/task-temp.tasks";
-    let mut output = std::fs::File::create(task_path)?;
-    for line in task.split('\n') {
-        writeln!(output, "{}", line.trim_start_matches('!'))?;
+// TODO use something safer
+static mut TASK_CTX: OnceCell<NadiFunctions> = OnceCell::new();
+
+fn new_ctx() -> TaskContext {
+    let functions = unsafe { TASK_CTX.get_or_init(|| NadiFunctions::new()).clone() };
+    TaskContext {
+        functions: functions.clone(),
+        ..Default::default()
     }
+}
 
-    let out = Command::new("nadi")
-        .arg(task_path)
-        .current_dir(pwd)
-        .output()
-        .context("Could not run nadi command")?;
+pub fn run_task(task: &str, args: &str, pwd: &Path) -> anyhow::Result<Vec<Event<'static>>> {
+    let mut tasks = String::with_capacity(task.len());
+    for line in task.split('\n') {
+        tasks.push_str(&line.trim_start_matches('!'));
+        tasks.push('\n');
+    }
+    tasks.push('\n');
 
+    let tokens = get_tokens(&tasks);
+    let tasks = tasks::parse(tokens)?;
+
+    let mut ctx = new_ctx();
+
+    let mut response = String::new();
+    std::env::set_current_dir(pwd)?;
+    for task in tasks {
+        let mut buf = gag::BufferRedirect::stdout().unwrap();
+        let res = ctx.execute(task);
+        buf.read_to_string(&mut response).unwrap();
+        response.push('\n');
+        match res {
+            Ok(Some(out)) => {
+                response.push_str(&out);
+                response.push('\n');
+            }
+            Ok(None) => (),
+            Err(e) => {
+                return Ok(output_verbose(
+                    vec![Event::Text("*Error*:".into())],
+                    e,
+                    "error",
+                    pwd,
+                ))
+            }
+        }
+    }
     let output_fmt = args.trim().split(' ').next().unwrap_or("verbose");
     let handler = output_handler(output_fmt);
-    if out.status.success() {
-        let response = String::from_utf8_lossy(&strip_ansi_escapes::strip(&clipped_from_stdout(
-            &out.stdout,
-        )))
-        .to_string();
-        Ok(handler(vec![Event::Text("Results:".into())], response, pwd))
-    } else {
-        let error = String::from_utf8_lossy(&out.stderr);
-        Ok(output_verbose(
-            vec![Event::Text("*Error*:".into())],
-            error.trim().to_string(),
-            pwd,
-        ))
-    }
+    Ok(handler(
+        vec![Event::Text("Results:".into())],
+        clipped_from_stdout(&response),
+        args.trim().split_once(' ').map(|a| a.1).unwrap_or_default(),
+        pwd,
+    ))
 }
 
 pub fn run_template(templ: &str, args: &str, pwd: &Path) -> anyhow::Result<Vec<Event<'static>>> {
@@ -67,24 +96,25 @@ pub fn run_template(templ: &str, args: &str, pwd: &Path) -> anyhow::Result<Vec<E
         Ok(txt) => Ok(output_verbose(
             vec![Event::Text(format!("Results (with: {args}):").into())],
             txt,
+            "",
             pwd,
         )),
         Err(e) => Ok(output_verbose(
             vec![Event::Text("*Error*:".into())],
             e.to_string(),
+            "error",
             pwd,
         )),
     }
 }
 
 pub fn run_table(table: &str, args: &str, pwd: &Path) -> anyhow::Result<Vec<Event<'static>>> {
-    // TODO proper temp random file
-    let task_path = "/tmp/task-temp.tasks";
-    let mut output = std::fs::File::create(task_path)?;
     let mut table_contents = String::new();
+    let mut tasks = String::new();
     for line in table.split('\n') {
         if let Some(l) = line.strip_prefix('!') {
-            writeln!(output, "{}", l)?;
+            tasks.push_str(l);
+            tasks.push('\n');
         } else {
             table_contents.push_str(line);
             table_contents.push('\n');
@@ -102,26 +132,47 @@ pub fn run_table(table: &str, args: &str, pwd: &Path) -> anyhow::Result<Vec<Even
         }
     }
 
-    writeln!(output, "network table_to_{}(template=\"", output_fmt)?;
-    write!(output, "{}", table_contents)?;
-    writeln!(output, "\"{})", targs)?;
+    tasks.push_str("\nnetwork table_to_");
+    tasks.push_str(output_fmt);
+    tasks.push_str("(template=\"");
+    tasks.push_str(&table_contents);
+    tasks.push('"');
+    tasks.push_str(&targs);
+    tasks.push_str(&")\n");
 
-    let out = Command::new("nadi")
-        .arg(task_path)
-        .current_dir(pwd)
-        .output()
-        .context("Could not run nadi command")?;
+    let tokens = get_tokens(&tasks);
+    let tasks = tasks::parse(tokens)?;
 
-    let handler = output_handler(output_fmt);
-    if out.status.success() {
-        let response = clipped_from_stdout(&out.stdout);
-        Ok(handler(vec![Event::Text("Results:".into())], response, pwd))
-    } else {
-        let error = String::from_utf8_lossy(&out.stderr);
-        Ok(output_verbose(
-            vec![Event::Text("*Error*:".into())],
-            error.trim().to_string(),
-            pwd,
-        ))
+    let mut ctx = new_ctx();
+
+    let mut response = String::new();
+    for task in tasks {
+        // since we can't have anything else print on mdbook
+        let mut buf = gag::BufferRedirect::stdout().unwrap();
+        let res = ctx.execute(task);
+        response.clear();
+        buf.read_to_string(&mut response).unwrap();
+        response.push('\n');
+        match res {
+            Ok(Some(out)) => {
+                response.push_str(&out);
+            }
+            Ok(None) => (),
+            Err(e) => {
+                return Ok(output_verbose(
+                    vec![Event::Text("*Error*:".into())],
+                    e,
+                    "error",
+                    pwd,
+                ))
+            }
+        }
     }
+    let handler = output_handler(output_fmt);
+    Ok(handler(
+        vec![Event::Text("Results:".into())],
+        response,
+        "",
+        pwd,
+    ))
 }

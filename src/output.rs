@@ -2,7 +2,7 @@ use crate::cmark_events::event_to_static;
 use pulldown_cmark::{CodeBlockKind, Event, Tag, TagEnd};
 use std::path::Path;
 
-pub type OutputHandler = fn(Vec<Event<'static>>, String, &Path) -> Vec<Event<'static>>;
+pub type OutputHandler = fn(Vec<Event<'static>>, String, &str, &Path) -> Vec<Event<'static>>;
 
 pub fn output_handler(fmt: &str) -> OutputHandler {
     match fmt {
@@ -17,10 +17,12 @@ pub fn output_handler(fmt: &str) -> OutputHandler {
 pub fn output_verbose(
     mut pre: Vec<Event<'static>>,
     text: String,
+    args: &str,
     _pwd: &Path,
 ) -> Vec<Event<'static>> {
+    let lang = if args.is_empty() { "output" } else { args }.to_string();
     pre.extend(vec![
-        Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced("output".into()))),
+        Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(lang.into()))),
         Event::Text(text.into()),
         Event::End(TagEnd::CodeBlock),
     ]);
@@ -30,11 +32,17 @@ pub fn output_verbose(
 pub fn output_image(
     mut pre: Vec<Event<'static>>,
     text: String,
+    args: &str,
     _pwd: &Path,
 ) -> Vec<Event<'static>> {
+    let link = if args.is_empty() {
+        text
+    } else {
+        args.to_string()
+    };
     let img = Tag::Image {
         link_type: pulldown_cmark::LinkType::Reference,
-        dest_url: text.into(),
+        dest_url: link.into(),
         title: String::new().into(),
         id: String::new().into(),
     };
@@ -55,9 +63,15 @@ pub fn output_image(
     pre
 }
 
-pub fn output_file(mut pre: Vec<Event<'static>>, text: String, pwd: &Path) -> Vec<Event<'static>> {
+pub fn output_file(
+    mut pre: Vec<Event<'static>>,
+    text: String,
+    args: &str,
+    pwd: &Path,
+) -> Vec<Event<'static>> {
+    let lang = if args.is_empty() { "output" } else { args }.to_string();
     pre.push(Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(
-        "output".into(),
+        lang.into(),
     ))));
     match std::fs::read_to_string(pwd.join(text)) {
         Ok(text) => pre.push(Event::Text(text.into())),
@@ -70,6 +84,7 @@ pub fn output_file(mut pre: Vec<Event<'static>>, text: String, pwd: &Path) -> Ve
 pub fn output_markdown(
     mut pre: Vec<Event<'static>>,
     text: String,
+    _args: &str,
     _pwd: &Path,
 ) -> Vec<Event<'static>> {
     let mut opts = pulldown_cmark::Options::empty();
@@ -87,8 +102,7 @@ pub fn output_markdown(
     pre
 }
 
-pub fn clipped_from_stdout(output: &[u8]) -> String {
-    let response = String::from_utf8_lossy(output);
+pub fn clipped_from_stdout(response: &str) -> String {
     let mut parts = response.trim().split("----8<----");
     // optionally maybe we can just use the mdbook syntax to hide the line between the clip parts.
     let first = parts.next().unwrap_or_default();
