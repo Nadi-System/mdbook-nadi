@@ -22,13 +22,17 @@ pub fn nadi_code_args(mark: &str) -> Option<(CodeHandler, String)> {
     })
 }
 
-// TODO use something safer
-static mut TASK_CTX: OnceCell<NadiFunctions> = OnceCell::new();
+static mut NADI_FUNCS: OnceCell<NadiFunctions> = OnceCell::new();
 
 fn new_ctx() -> TaskContext {
-    let functions = unsafe { TASK_CTX.get_or_init(|| NadiFunctions::new()).clone() };
+    // The static mut ref is for OnceCell, and it is immediately
+    // cloned to be used, so it is safe. This just saves us from
+    // loading the plugins over and over again for each code block,
+    // significantly improving the runtime speed
+    #[allow(static_mut_refs)]
+    let functions = unsafe { NADI_FUNCS.get_or_init(|| NadiFunctions::new()) }.clone();
     TaskContext {
-        functions: functions.clone(),
+        functions,
         ..Default::default()
     }
 }
